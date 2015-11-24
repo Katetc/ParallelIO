@@ -4,8 +4,11 @@
 
 add_executable (pioperf EXCLUDE_FROM_ALL
                 pioperformance.F90)
+add_executable (perftest EXCLUDE_FROM_ALL
+                perftest.c)
 target_link_libraries (pioperf piof)
-add_dependencies (tests pioperf)
+target_link_libraries (perftest pioc lmpe mpe pthread m)
+add_dependencies (tests pioperf perftest)
 
 if ("${CMAKE_Fortran_COMPILER_ID}" STREQUAL "GNU")
     target_compile_options (pioperf
@@ -20,5 +23,10 @@ endif ()
 
 if (PIO_HDF5_LOGGING) 
     target_compile_definitions (pioperf 
+        PUBLIC LOGGING)
+endif ()
+
+if (PIO_HDF5_LOGGING) 
+    target_compile_definitions (perftest
         PUBLIC LOGGING)
 endif ()
