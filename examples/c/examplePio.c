@@ -222,7 +222,6 @@ struct examplePioClass* epc_new()
     this->closeFile = epc_closeFile;
     this->cleanUp = epc_cleanUp;
     this->errorHandler = epc_errorHandler;
-    
     return this;
 }
 

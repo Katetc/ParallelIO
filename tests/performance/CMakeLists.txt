@@ -7,7 +7,6 @@ add_executable (pioperf EXCLUDE_FROM_ALL
 add_executable (perftest EXCLUDE_FROM_ALL
                 perftest.c)
 target_link_libraries (pioperf piof)
-target_link_libraries (perftest pioc lmpe mpe pthread m)
 add_dependencies (tests pioperf perftest)
 
 if ("${CMAKE_Fortran_COMPILER_ID}" STREQUAL "GNU")
@@ -30,3 +29,17 @@ if (PIO_HDF5_LOGGING)
     target_compile_definitions (perftest
         PUBLIC LOGGING)
 endif ()
+
+#===== MPE =====
+find_package (MPE "2.4.8" COMPONENTS C)
+if (MPE_C_FOUND)
+    target_include_directories (perftest
+        PUBLIC ${MPE_C_INCLUDE_DIRS})
+    target_compile_definitions (perftest
+        PUBLIC _MPE)
+    target_link_libraries (perftest pioc lmpe mpe pthread m)
+else ()
+    target_compile_definitions (perftest
+        PUBLIC _NOMPE)
+endif ()
+
