@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <mpi.h>
 #include <pio.h>
+#ifdef TIMING
+#include <gptl.h>
+#endif
 
 static const int LEN = 16;
 static const int VAL = 42;
@@ -226,6 +229,13 @@ struct examplePioClass* epc_new()
 int main(int argc, const char* argv[])
 {
     struct examplePioClass* pioExInst = epc_new();
+    int ret;
+
+#ifdef TIMING    
+    /* Initialize the GPTL timing library. */
+    if ((ret = GPTLinitialize ()))
+      return ret;
+#endif    
     
     pioExInst->init(pioExInst);
     pioExInst->createDecomp(pioExInst);
