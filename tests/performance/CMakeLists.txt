@@ -5,7 +5,11 @@
 add_executable (pioperf EXCLUDE_FROM_ALL
                 pioperformance.F90)
 target_link_libraries (pioperf piof)
+<<<<<<< HEAD
 add_dependencies (tests pioperf)
+=======
+add_dependencies (tests pioperf perftest)
+>>>>>>> more work on perftest.c
 
 if ("${CMAKE_Fortran_COMPILER_ID}" STREQUAL "GNU")
     target_compile_options (pioperf
@@ -22,3 +26,25 @@ if (PIO_HDF5_LOGGING)
     target_compile_definitions (pioperf 
         PUBLIC LOGGING)
 endif ()
+<<<<<<< HEAD
+=======
+
+if (PIO_HDF5_LOGGING) 
+    target_compile_definitions (perftest
+        PUBLIC LOGGING)
+endif ()
+
+#===== MPE =====
+find_package (MPE "2.4.8" COMPONENTS C)
+if (MPE_C_FOUND)
+    target_include_directories (perftest
+        PUBLIC ${MPE_C_INCLUDE_DIRS})
+    target_compile_definitions (perftest
+        PUBLIC _MPE)
+    target_link_libraries (perftest pioc lmpe mpe pthread m)
+else ()
+    target_compile_definitions (perftest
+        PUBLIC _NOMPE)
+endif ()
+
+>>>>>>> more work on perftest.c
