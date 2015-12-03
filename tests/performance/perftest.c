@@ -12,9 +12,19 @@
 #include <math.h>
 #include <pio.h>
 
-#define NDIMS 1
-static const int LEN = 16;
+/** Number of dimensions for output variable. */
+#define NDIMS 2
+
+/** Length of the X dimension. */
+static const int X_LEN = 4;
+
+/** Length of the y dimension. */
+static const int Y_LEN = 4;
+
+/** Starting value for sample data. */
 static const int VAL = 42;
+
+/** Error code returned if there is a problem. */
 static const int ERR_CODE = 99;
 
 /* Some error codes for when things go wrong. */
@@ -47,57 +57,73 @@ static const int ERR_CODE = 99;
 	return e;				\
     } while (0) 
 
-/* global err buffer for MPI. */
+/** Lentgh of error buffer, needed for MPI error handler. */
 int resultlen;
+
+/** Global err buffer for MPI. */
 char err_buffer[MPI_MAX_ERROR_STRING];
 
-/* These are for the event numbers array used to log various events in
- * the program with the MPE library, which produces output for the
- * Jumpshot program. */
-#define NUM_EVENTS 7
-#define START 0
-#define END 1
-#define INIT 0
-#define UPDATE 1
-#define WRITE 2
-#define SWAP 3
-#define COMM 4
-#define CALCULATE 5 
-#define INGEST 6
+/** Number of events for the MPE library to measure. */
+#define NUM_EVENTS 6
 
-/* This will set up the MPE logging event numbers. */
+/** Start an MPE event. */
+#define START 0
+
+/** End an MPE event. */
+#define END 1
+
+/** Event for initialization of library. */
+#define INIT 0
+
+/** Event for creation of sample file. */
+#define CREATE 1
+
+/** Event for caluclations. */
+#define CALCULATE 2
+
+/** Event for writing data to sample file. */
+#define WRITE 3
+
+/** Event for reading data from sample file. */
+#define READ 4
+
+/** Event for cleanup of resourses. */
+#define CLEANUP 5
+
+/** Set up the MPE event numbers array. This array is used to log
+ * various events in the program with the MPE library, which produces
+ * output for the Jumpshot program. 
+ * @param my_rank: rank of processor.
+ * @param event_num: 2D array used to hold the event numbers MPE
+ * needs.
+ *
+ * @returns: 0 for success, non-zero for error. 
+ */
 int
 init_logging(int my_rank, int event_num[][NUM_EVENTS])
 {
     /* Get a bunch of event numbers. */
     event_num[START][INIT] = MPE_Log_get_event_number();
     event_num[END][INIT] = MPE_Log_get_event_number();
-    event_num[START][UPDATE] = MPE_Log_get_event_number();
-    event_num[END][UPDATE] = MPE_Log_get_event_number();
-    event_num[START][INGEST] = MPE_Log_get_event_number();
-    event_num[END][INGEST] = MPE_Log_get_event_number();
-    event_num[START][COMM] = MPE_Log_get_event_number();
-    event_num[END][COMM] = MPE_Log_get_event_number();
+    event_num[START][CREATE] = MPE_Log_get_event_number();
+    event_num[END][CREATE] = MPE_Log_get_event_number();
     event_num[START][CALCULATE] = MPE_Log_get_event_number();
     event_num[END][CALCULATE] = MPE_Log_get_event_number();
     event_num[START][WRITE] = MPE_Log_get_event_number();
     event_num[END][WRITE] = MPE_Log_get_event_number();
-    event_num[START][SWAP] = MPE_Log_get_event_number();
-    event_num[END][SWAP] = MPE_Log_get_event_number();
+    event_num[START][READ] = MPE_Log_get_event_number();
+    event_num[END][READ] = MPE_Log_get_event_number();
+    event_num[START][CLEANUP] = MPE_Log_get_event_number();
+    event_num[END][CLEANUP] = MPE_Log_get_event_number();
 
-    /* You should track at least initialization and partitioning, data
-     * ingest, update computation, all communications, any memory
-     * copies (if you do that), any output rendering, and any global
-     * communications. */
     if (!my_rank)
     {
 	MPE_Describe_state(event_num[START][INIT], event_num[END][INIT], "init", "yellow");
-	MPE_Describe_state(event_num[START][INGEST], event_num[END][INGEST], "ingest", "red");
-	MPE_Describe_state(event_num[START][UPDATE], event_num[END][UPDATE], "update", "green");
+	MPE_Describe_state(event_num[START][CREATE], event_num[END][CREATE], "create", "red");
 	MPE_Describe_state(event_num[START][CALCULATE], event_num[END][CALCULATE], "calculate", "orange");
 	MPE_Describe_state(event_num[START][WRITE], event_num[END][WRITE], "write", "purple");
-	MPE_Describe_state(event_num[START][COMM], event_num[END][COMM], "reduce", "blue");
-	MPE_Describe_state(event_num[START][SWAP], event_num[END][SWAP], "swap", "pink");
+	MPE_Describe_state(event_num[START][READ], event_num[END][READ], "read", "blue");
+	MPE_Describe_state(event_num[START][CLEANUP], event_num[END][CLEANUP], "cleanup", "pink");
     }
     return 0;
 }
@@ -189,7 +215,7 @@ int check_file(int my_rank, PIO_Offset arrIdxPerPe, int iosysid, char *filename,
     return 0;
 }  
 
-/* Write the test file. */
+/** Create the output file, including metadata. */
 int create_file(int my_rank, PIO_Offset arrIdxPerPe, int iosysid, int iodescNCells,
 		char *filename, int iotype, int ndims, int *dimlen, int verbose,
 		int *data_buffer, int *ncid) {
@@ -212,17 +238,30 @@ int create_file(int my_rank, PIO_Offset arrIdxPerPe, int iosysid, int iodescNCel
     if ((ret = PIOc_enddef(*ncid)))
 	ERR(ret);
 
+    /* Everything worked! */
+    return 0;
+}
+
+/** Write data to the output file. */
+int write_data(int my_rank, PIO_Offset arrIdxPerPe, int iosysid, int iodescNCells,
+	       char *filename, int iotype, int ndims, int *dimlen, int verbose,
+	       int *data_buffer, int ncid) {
+    int ncid2;
+    int iptype;
+    int ret;
+    int pioDimId, pioVarId;
+
     /* Write data to file. */
     if (verbose) 
 	printf("About to write for processor %d\n", my_rank);
-    if ((ret = PIOc_write_darray(*ncid, pioVarId, iodescNCells,
+    if ((ret = PIOc_write_darray(ncid, pioVarId, iodescNCells,
 				 (PIO_Offset)arrIdxPerPe, data_buffer, NULL)))
 	ERR(ret);
       
     /* Close the netCDF output file. */
     if (!my_rank && verbose)
 	printf("closing file...\n");
-    if ((ret = PIOc_closefile(*ncid)))
+    if ((ret = PIOc_closefile(ncid)))
 	ERR(ret);
 
     /* Everything worked! */
@@ -236,7 +275,6 @@ int main(int argc, char* argv[]) {
     int pioIoSystem;
     int dimlen[NDIMS];
     int iodescNCells;
-    dimlen[0] = LEN;
     PIO_Offset *compdof = NULL;
     PIO_Offset arrIdxPerPe;
     int *readBuffer = NULL;
@@ -246,6 +284,10 @@ int main(int argc, char* argv[]) {
     int ncid;
     int ret;
 
+    /* Specify the lengths of each dimension. */
+    dimlen[0] = X_LEN;
+    dimlen[1] = Y_LEN;
+
     /* Initialize MPI. */
     MPI_Init(&argc, &argv);
     MPI_Errhandler_set(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
@@ -253,7 +295,7 @@ int main(int argc, char* argv[]) {
     /* Learn my rank and the total number of processors. */
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &p);
-    arrIdxPerPe = LEN/p;
+    arrIdxPerPe = (X_LEN * Y_LEN)/p;
 
     /* Turn off comments in all but task 0. */
     /* if (verbose && my_rank) */
@@ -283,7 +325,7 @@ int main(int argc, char* argv[]) {
     if ((ret = MPI_Barrier(MPI_COMM_WORLD)))
 	MPIERR(ret);
 
-    /* Start MPE logging for file initialization. */
+    /* Start MPE logging for initialization. */
     if ((ret = MPE_Log_event(event_num[START][INIT], 0, "start init")))
 	MPIERR(ret);
 
@@ -292,8 +334,12 @@ int main(int argc, char* argv[]) {
 			verbose, &pioIoSystem)))
 	ERR(ret);
 
-    /* We are done with initialization. */
+    /* End MPE logging for initialization. */
     if ((ret = MPE_Log_event(event_num[END][INIT], 0, "end init")))
+	MPIERR(ret);
+
+    /* Start MPE logging for file creation. */
+    if ((ret = MPE_Log_event(event_num[CREATE][INIT], 0, "start create")))
 	MPIERR(ret);
 
     /* Create the file. */
@@ -301,11 +347,40 @@ int main(int argc, char* argv[]) {
 			   iotype, NDIMS, dimlen, verbose, data_buffer, &ncid)))
 	ERR(ret);
   
+    /* End MPE logging for file creation. */
+    if ((ret = MPE_Log_event(event_num[END][CREATE], 0, "end create")))
+	MPIERR(ret);
+
+    /* Start MPE logging for writing. */
+    if ((ret = MPE_Log_event(event_num[START][WRITE], 0, "start write")))
+	MPIERR(ret);
+
+    /* Write data to the file. */
+    if ((ret = write_data(my_rank, arrIdxPerPe, pioIoSystem, iodescNCells, filename,
+			  iotype, NDIMS, dimlen, verbose, data_buffer, ncid)))
+	ERR(ret);
+  
+    /* End MPE logging for writing. */
+    if ((ret = MPE_Log_event(event_num[END][WRITE], 0, "end write")))
+	MPIERR(ret);
+
+    /* Start MPE logging for reading. */
+    if ((ret = MPE_Log_event(event_num[START][READ], 0, "start read")))
+	MPIERR(ret);
+
     /* Check that the output file is correct. */
     if ((ret = check_file(my_rank, arrIdxPerPe, pioIoSystem, filename, iotype,
 			  iodescNCells, NDIMS, dimlen, verbose, data_buffer)))
       ERR(ret);
    
+    /* End MPE logging for reading. */
+    if ((ret = MPE_Log_event(event_num[END][READ], 0, "end read")))
+	MPIERR(ret);
+
+    /* Start MPE logging for cleanup. */
+    if ((ret = MPE_Log_event(event_num[START][CLEANUP], 0, "start cleanup")))
+	MPIERR(ret);
+
     /* Clean up PIO decomp. */
     if (verbose)
 	printf("cleaning up PIO decomposition...\n");
@@ -321,6 +396,10 @@ int main(int argc, char* argv[]) {
 	printf("cleaning up PIO IO system...\n");
     if ((ret = PIOc_finalize(pioIoSystem)))
 	ERR(ret);
+
+    /* End MPE logging for initialization. */
+    if ((ret = MPE_Log_event(event_num[END][CLEANUP], 0, "end cleanup")))
+	MPIERR(ret);
 
     /* Shut down MPI. */
     if (verbose)
