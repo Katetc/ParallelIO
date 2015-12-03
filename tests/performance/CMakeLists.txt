@@ -4,6 +4,8 @@
 
 add_executable (pioperf EXCLUDE_FROM_ALL
                 pioperformance.F90)
+add_executable (perftest EXCLUDE_FROM_ALL
+                perftest.c)
 target_link_libraries (pioperf piof)
 add_dependencies (tests pioperf perftest)
 
