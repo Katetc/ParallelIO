@@ -273,7 +273,7 @@ contains
 
   end subroutine pio_writedof
 
-  subroutine pio_readdof (file, DOF, comm, punit)
+  subroutine pio_readdof (file, DOF, comm, punit, ndims, gdims)
     !-----------------------------------------------------------------------
     ! Purpose:
     !
@@ -296,9 +296,13 @@ contains
     integer(kind=pio_offset),pointer:: dof(:)
     integer         ,intent(in) :: comm
     integer,optional,intent(in) :: punit
+    integer,optional,intent(out) :: ndims
+    integer,pointer,optional,intent(out) :: gdims(:)
 
     character(len=*), parameter :: subName=modName//'::pio_readdof'
-    integer :: ierr, myrank, npes, m, n, unit, rn
+    character(len=50) :: fline, fline2
+    integer :: ierr, myrank, npes, m, n, unit, rn, rdim, ndim, dum1
+    integer :: iblnk
     integer(kind=pio_offset) :: sdof
     integer :: rversno, rnpes
     integer(kind=pio_offset), pointer :: wdof(:)
@@ -328,10 +332,30 @@ contains
     if (myrank == masterproc) then
        write(6,*) subName,': reading file ',trim(file),' unit=',unit
        open(unit,file=file,status='old')
-       read(unit,*) rversno,rnpes
-       write(6,*) subName,': reading file ',trim(file),' versno=',rversno
+       ! PIO1 version
+       ! read(unit,*) rversno, rnpes
+       ! PIO2 decomp
+       read(unit, '(A)') fline
+       iblnk=index(fline,' ')
+       read(fline(iblnk:iblnk+4),*) rversno
+       read(fline(iblnk+11:),*) rnpes
+       iblnk=index(fline,'ndims')
+       read(fline(iblnk+6:),*) rdim
+
        if (rnpes /= npes) then
           call piodie(__PIO_FILE__,__LINE__,'pio_readdof npes incorrect')
+       endif
+
+       ! To support PIO2 decomp files, we need to read in the globsl dimensions line
+       read(unit,'(A)') fline
+
+       if(present(ndims)) then
+          ndims = rdim
+       endif
+
+       if (present(gdims)) then
+          allocate(gdims(rdim))
+       	  read(fline,*) gdims
        endif
 
        do n = 0,npes-1
@@ -340,14 +364,23 @@ contains
              call piodie(__PIO_FILE__,__LINE__,'pio_readdof rn out of sync')
           endif
           allocate(wdof(sdof))
-          do m = 1,sdof
-             read(unit,*) wdof(m)
-          enddo
+	  !PIO1 method
+          !do m = 1,sdof
+          !   read(unit,*) wdof(m)
+          !enddo
+	  ! PIO2
+	  read(unit, *) wdof
           if (n == masterproc) then
              deallocate(dof)
              allocate(dof(sdof))
              dof = wdof
           else
+	     if(present(ndims)) then
+	     	  call MPI_SEND(ndims, 1, MPI_INT, n, n, comm, ierr)
+	     endif
+	     if(present(gdims)) then
+	     	  call MPI_SEND(gdims, ndims, MPI_INT, n, n, comm, ierr)
+	     endif
              call MPI_SEND(sdof,1,PIO_OFFSET_KIND,n,n,comm,ierr)
              if (ierr /= MPI_SUCCESS) call piodie(__PIO_FILE__,__LINE__,' pio_readdof mpi_send1')
              if (sdof > 0) then
@@ -359,6 +392,16 @@ contains
        enddo
        close(unit)
     else
+       if (present(ndims)) then
+       	  call MPI_RECV(ndims, 1, MPI_INT, masterproc, myrank, comm,status,ierr)
+          if (ierr /= MPI_SUCCESS) call piodie(__PIO_FILE__,__LINE__,' pio_readdof mpi_recv ndims')
+       endif
+       if (present(gdims)) then
+          allocate(gdims(ndims))
+          call MPI_RECV(gdims, ndims, MPI_INT, masterproc, myrank, comm,status,ierr)
+          if (ierr /= MPI_SUCCESS) call piodie(__PIO_FILE__,__LINE__,' pio_readdof mpi_recv gdims')
+       endif 
+
        call MPI_RECV(sdof,1,PIO_OFFSET_KIND,masterproc,myrank,comm,status,ierr)
        if (ierr /= MPI_SUCCESS) call piodie(__PIO_FILE__,__LINE__,' pio_readdof mpi_recv1')
        if (sdof > 0) then
